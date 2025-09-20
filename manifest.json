@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Finance Buddy",
+  "version": "1.0",
+  "description": "Track spending from email receipts with AI",
+  "permissions": ["identity", "identity.email", "storage", "tabs"],
+  "host_permissions": ["https://mail.google.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "128": "icons/icon128.png"
+  }
+}
