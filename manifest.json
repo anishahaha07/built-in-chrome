@@ -1,10 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "Finance Buddy",
+  "name": "MyFi",
   "version": "1.0",
   "description": "Track spending from email receipts with AI",
   "permissions": ["identity", "identity.email", "storage", "tabs"],
-  "host_permissions": ["https://mail.google.com/*"],
+  "host_permissions": [
+    "https://mail.google.com/*",
+    "https://www.accounts.google.com/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },
@@ -13,5 +16,11 @@
   },
   "icons": {
     "128": "icons/icon128.png"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["chart.js", "popup.js", "popup.css"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }
