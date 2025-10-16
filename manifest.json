@@ -3,10 +3,11 @@
   "name": "MyFi",
   "version": "1.0",
   "description": "Track spending from email receipts with AI",
-  "permissions": ["identity", "identity.email", "storage", "tabs"],
+  "permissions": ["identity", "identity.email", "storage"],
   "host_permissions": [
     "https://mail.google.com/*",
-    "https://www.accounts.google.com/*"
+    "https://www.accounts.google.com/*",
+    "https://gmail.googleapis.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -15,7 +16,14 @@
     "default_popup": "popup.html"
   },
   "icons": {
-    "128": "icons/icon128.png"
+    "128": "icons/mifi.png"
+  },
+  "oauth2": {
+    "client_id": "525580778071-g3l6272rnaiukimsn3r2rbflu0epdhjv.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/gmail.readonly",
+      "https://www.googleapis.com/auth/userinfo.email"
+    ]
   },
   "web_accessible_resources": [
     {
