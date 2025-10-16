@@ -19,7 +19,7 @@
     "128": "icons/mifi.png"
   },
   "oauth2": {
-    "client_id": "525580778071-g3l6272rnaiukimsn3r2rbflu0epdhjv.apps.googleusercontent.com",
+    "client_id": "__OAUTH_CLIENT_ID__",
     "scopes": [
       "https://www.googleapis.com/auth/gmail.readonly",
       "https://www.googleapis.com/auth/userinfo.email"
@@ -32,3 +32,4 @@
     }
   ]
 }
+

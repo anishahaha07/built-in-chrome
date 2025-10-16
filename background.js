@@ -62,7 +62,7 @@ async function fetchReceiptEmails(token) {
 
     if (data.messages) {
       const emails = await fetchEmailDetails(data.messages, token);
-      const geminiApiKey = "AIzaSyAqMWwrIIM_NQpZ6UjTsbqWu2xKz8DHxes"; // Replace with your API key
+      const geminiApiKey = await getGeminiApiKey();
       const extractedData = await parseEmailsWithGemini(emails, geminiApiKey);
 
       chrome.storage.local.set(
@@ -82,6 +82,19 @@ async function fetchReceiptEmails(token) {
       lastScanned: Date.now(),
       error: error.message,
     });
+  }
+}
+
+async function getGeminiApiKey() {
+  try {
+    const res = await fetch(chrome.runtime.getURL('config.json'));
+    if (!res.ok) throw new Error(`config.json ${res.status}`);
+    const cfg = await res.json();
+    if (!cfg.geminiApiKey) throw new Error('geminiApiKey missing in config.json');
+    return cfg.geminiApiKey;
+  } catch (e) {
+    console.error('Failed to load Gemini API key from config.json:', e);
+    return '';
   }
 }
 
