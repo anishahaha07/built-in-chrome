@@ -40,7 +40,7 @@ async function fetchReceiptEmails(token) {
     const oneMonthAgo = new Date();
     oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
     const afterDate = oneMonthAgo.toISOString().split("T")[0];
-    const query = `subject:(receipt OR order OR invoice OR confirmation) OR from:(amazon.com OR swiggy.in OR zomato.com OR uber.com OR flipkart.com OR ola.com OR blinkit.com OR myntra.com OR ajio.com) after:${afterDate}`;
+    const query = `subject:(receipt OR order OR invoice OR confirmation) OR from:(amazon.com OR swiggy.in OR zomato.com OR uber.com OR flipkart.com OR ola.com OR blinkit.com OR myntra.com OR ajio.com OR spotify.com OR paypal OR stripe OR apple.com) after:${afterDate}`;
     const response = await fetch(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(
         query
@@ -166,9 +166,9 @@ async function parseEmailsWithGemini(emails, apiKey) {
       // Priority 3: Use text-only model with HTML content
       else if (htmlContent) {
         console.log("Using AI for HTML content analysis...");
-        const truncatedHTML = htmlContent.substring(0, 8000);
+        const receiptContent = extractReceiptContent(htmlContent, body);
         data = await analyzeReceiptText(
-          truncatedHTML,
+          receiptContent,
           subject,
           from,
           date,
@@ -178,9 +178,9 @@ async function parseEmailsWithGemini(emails, apiKey) {
       // Priority 4: Use plain text body
       else {
         console.log("Using AI for text body analysis...");
-        const truncatedBody = body.substring(0, 5000);
+        const receiptContent = extractReceiptContent(null, body);
         data = await analyzeReceiptText(
-          truncatedBody,
+          receiptContent,
           subject,
           from,
           date,
@@ -242,27 +242,18 @@ async function parseEmailsWithGemini(emails, apiKey) {
 }
 
 async function analyzeReceiptImage(imageData, subject, from, date, apiKey) {
-  const prompt = `Analyze this receipt image and extract transaction details. Return ONLY valid JSON with no markdown or extra text.
+  const prompt = `Extract receipt data from this image. Return ONLY JSON.
 
-Context:
-- Email Subject: ${subject}
-- From: ${from}
-- Email Date: ${date}
+Context: ${subject} | ${from} | ${date}
 
-Extract these fields from the receipt image:
-- merchant: Company/store name
-- date: Transaction date in YYYY-MM-DD format (look for order date, purchase date, trip date)
-- amount: Total amount paid as a number with 2 decimal places (e.g., 75.75 not 7)
-- category: One of: "food", "groceries", "shopping", "travel", "entertainment", "other"
-- currency: "INR" for ₹/Rs or "USD" for $
+Extract:
+- merchant: Company name
+- date: Transaction date (YYYY-MM-DD)
+- amount: Total amount (number with decimals)
+- category: "food", "groceries", "shopping", "travel", "entertainment", "other"
+- currency: "INR" or "USD"
 
-Rules:
-- Look carefully at the receipt for FULL total amount including decimals
-- Use the transaction date from the receipt, not the email date
-- If merchant not clear from image, extract from email sender
-- Return ONLY JSON: {"merchant": "...", "date": "...", "amount": 75.75, "category": "...", "currency": "INR"}
-
-Example: {"merchant": "Uber", "date": "2025-09-15", "amount": 245.50, "category": "travel", "currency": "INR"}`;
+Return ONLY JSON: {"merchant": "...", "date": "...", "amount": 75.75, "category": "...", "currency": "INR"}`;
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`,
@@ -286,7 +277,7 @@ Example: {"merchant": "Uber", "date": "2025-09-15", "amount": 245.50, "category"
         generationConfig: {
           temperature: 0.1,
           topP: 0.8,
-          maxOutputTokens: 300,
+          maxOutputTokens: 150,
         },
       }),
     }
@@ -317,33 +308,24 @@ Example: {"merchant": "Uber", "date": "2025-09-15", "amount": 245.50, "category"
 }
 
 async function analyzeReceiptText(body, subject, from, date, apiKey) {
-  const prompt = `Extract receipt/order details from this email and return ONLY valid JSON with no markdown, code blocks, or extra text.
+  const prompt = `Extract receipt data from this content. Return ONLY JSON.
 
-Email Subject: ${subject}
+Subject: ${subject}
 From: ${from}
-Email Date: ${date}
-Body: ${body}
+Date: ${date}
+Content: ${body}
 
-IMPORTANT: Look carefully for:
-- Total amount, Order Total, Amount Paid, Grand Total - extract COMPLETE number with decimals (e.g., 75.75 not 7)
-- Order date, Purchase date, Transaction date
-- Store/merchant name
-- Currency (₹/Rs/INR or $/USD)
-
-Extract these fields:
-- merchant: The company/store name (e.g., "Amazon", "Swiggy", "Uber")
-- date: The ACTUAL transaction/order date in YYYY-MM-DD format (NOT today's date)
-- amount: The total amount as a number with decimals (e.g., 75.75)
-- category: One of: "food", "groceries", "shopping", "travel", "entertainment", "other"
-- currency: "INR" for Indian currency or "USD" for dollars
+Extract:
+- merchant: Company name
+- date: Transaction date (YYYY-MM-DD)
+- amount: Total amount (number with decimals)
+- category: "food", "groceries", "shopping", "travel", "entertainment", "other"
+- currency: "INR" or "USD"
 
 Rules:
-- For merchant: Extract from email header, subject, or body
-- For date: Use the transaction date from the email, NOT the email received date. If truly not found, use "${date}"
-- For amount: Extract the FULL final total amount including decimals. If not found, use 0
-- Return ONLY the JSON object, no other text
-
-Example: {"merchant": "Swiggy", "date": "2025-09-15", "amount": 324.50, "category": "food", "currency": "INR"}`;
+- Use transaction date, not email date
+- Extract FULL amount with decimals
+- Return ONLY JSON: {"merchant": "...", "date": "...", "amount": 75.75, "category": "...", "currency": "INR"}`;
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`,
@@ -355,7 +337,7 @@ Example: {"merchant": "Swiggy", "date": "2025-09-15", "amount": 324.50, "categor
         generationConfig: {
           temperature: 0.1,
           topP: 0.8,
-          maxOutputTokens: 200,
+          maxOutputTokens: 100,
         },
       }),
     }
@@ -735,4 +717,157 @@ function validateCategory(category) {
     .toLowerCase()
     .trim();
   return validCategories.includes(cat) ? cat : "other";
+}
+
+function extractReceiptContent(htmlContent, plainText) {
+  // Priority 1: Extract from HTML if available
+  if (htmlContent) {
+    const htmlReceipt = extractReceiptFromHTML(htmlContent);
+    if (htmlReceipt) {
+      console.log("Extracted receipt content from HTML:", htmlReceipt.length, "chars");
+      return htmlReceipt;
+    }
+  }
+  
+  // Priority 2: Extract from plain text
+  if (plainText) {
+    const textReceipt = extractReceiptFromText(plainText);
+    if (textReceipt) {
+      console.log("Extracted receipt content from text:", textReceipt.length, "chars");
+      return textReceipt;
+    }
+  }
+  
+  // Fallback: return truncated content
+  const content = htmlContent || plainText || "";
+  return content.substring(0, 2000); // Much smaller fallback
+}
+
+function extractReceiptFromHTML(html) {
+  try {
+    // Remove script tags, style tags, and other non-content elements
+    let cleanHtml = html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '')
+      .replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, '')
+      .replace(/<object[^>]*>[\s\S]*?<\/object>/gi, '')
+      .replace(/<embed[^>]*>[\s\S]*?<\/embed>/gi, '');
+    
+    // Look for receipt-specific sections
+    const receiptPatterns = [
+      /<div[^>]*class="[^"]*(?:receipt|invoice|order|bill|payment|total|amount)[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
+      /<table[^>]*class="[^"]*(?:receipt|invoice|order|bill|payment|total|amount)[^"]*"[^>]*>[\s\S]*?<\/table>/gi,
+      /<section[^>]*class="[^"]*(?:receipt|invoice|order|bill|payment|total|amount)[^"]*"[^>]*>[\s\S]*?<\/section>/gi,
+      /<div[^>]*id="[^"]*(?:receipt|invoice|order|bill|payment|total|amount)[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
+    ];
+    
+    for (let pattern of receiptPatterns) {
+      const matches = cleanHtml.match(pattern);
+      if (matches && matches.length > 0) {
+        const receiptSection = matches.join('\n');
+        // Extract text content from the receipt section
+        const textContent = receiptSection
+          .replace(/<[^>]*>/g, ' ')
+          .replace(/&nbsp;/g, ' ')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/\s+/g, ' ')
+          .trim();
+        
+        if (textContent.length > 50) {
+          return textContent;
+        }
+      }
+    }
+    
+    // If no specific receipt sections found, look for tables with financial data
+    const tablePattern = /<table[^>]*>[\s\S]*?(?:total|amount|price|₹|rs\.?|\$)[\s\S]*?<\/table>/gi;
+    const tableMatches = cleanHtml.match(tablePattern);
+    if (tableMatches && tableMatches.length > 0) {
+      const tableContent = tableMatches.join('\n')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/\s+/g, ' ')
+        .trim();
+      
+      if (tableContent.length > 30) {
+        return tableContent;
+      }
+    }
+    
+    // Fallback: extract content around financial keywords
+    const financialKeywords = /(?:total|amount|price|₹|rs\.?|\$|order|receipt|invoice|bill|payment)/gi;
+    const lines = cleanHtml.split('\n');
+    const relevantLines = [];
+    
+    for (let line of lines) {
+      if (financialKeywords.test(line) || 
+          /₹\s*\d+|\$\s*\d+|rs\.?\s*\d+|\d+\.\d{2}/.test(line)) {
+        const cleanLine = line
+          .replace(/<[^>]*>/g, ' ')
+          .replace(/&nbsp;/g, ' ')
+          .replace(/&amp;/g, '&')
+          .replace(/\s+/g, ' ')
+          .trim();
+        
+        if (cleanLine.length > 10) {
+          relevantLines.push(cleanLine);
+        }
+      }
+    }
+    
+    if (relevantLines.length > 0) {
+      return relevantLines.join('\n');
+    }
+    
+  } catch (error) {
+    console.error("Error extracting receipt from HTML:", error);
+  }
+  
+  return null;
+}
+
+function extractReceiptFromText(text) {
+  try {
+    const lines = text.split('\n');
+    const relevantLines = [];
+    
+    // Keywords that indicate receipt content
+    const receiptKeywords = [
+      'total', 'amount', 'price', 'order', 'receipt', 'invoice', 'bill', 'payment',
+      'subtotal', 'tax', 'delivery', 'service', 'fare', 'trip', 'booking'
+    ];
+    
+    // Currency patterns
+    const currencyPattern = /(?:₹|rs\.?|\$|usd|inr)\s*\d+(?:\.\d{2})?/i;
+    
+    for (let line of lines) {
+      const lowerLine = line.toLowerCase();
+      
+      // Check if line contains receipt keywords or currency
+      const hasReceiptKeyword = receiptKeywords.some(keyword => lowerLine.includes(keyword));
+      const hasCurrency = currencyPattern.test(line);
+      
+      if (hasReceiptKeyword || hasCurrency) {
+        const cleanLine = line.trim();
+        if (cleanLine.length > 5) {
+          relevantLines.push(cleanLine);
+        }
+      }
+    }
+    
+    if (relevantLines.length > 0) {
+      // Limit to most relevant lines (avoid sending too much)
+      const maxLines = Math.min(relevantLines.length, 20);
+      return relevantLines.slice(0, maxLines).join('\n');
+    }
+    
+  } catch (error) {
+    console.error("Error extracting receipt from text:", error);
+  }
+  
+  return null;
 }
