@@ -3,7 +3,7 @@
   "name": "MyFi",
   "version": "1.0",
   "description": "Track spending from email receipts with AI",
-  "permissions": ["identity", "identity.email", "storage"],
+  "permissions": ["identity", "identity.email", "storage", "activeTab"],
   "host_permissions": [
     "https://mail.google.com/*",
     "https://www.accounts.google.com/*",

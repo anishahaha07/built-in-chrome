@@ -1,18 +1,33 @@
-// background.js
+// Key fixes:
+// 1. Better amount detection with stricter patterns
+// 2. PDF attachment fetching via attachmentId
+// 3. Improved HTML amount extraction prioritization
+// 4. Better filtering of concert/promotional emails
+
 console.log("Background script loaded");
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("Extension installed or updated");
-  chrome.identity.getAuthToken({ interactive: true }, (token) => {
-    if (chrome.runtime.lastError) {
-      console.error("Auth error:", chrome.runtime.lastError.message);
-      return;
+  chrome.identity.getAuthToken(
+    {
+      interactive: true,
+      scopes: [
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.modify",
+      ],
+    },
+    (token) => {
+      if (chrome.runtime.lastError) {
+        console.error("Auth error:", chrome.runtime.lastError.message);
+        return;
+      }
+      console.log("Auth token acquired");
+      chrome.storage.local.set({ authToken: token });
+      fetchReceiptEmails(token);
     }
-    console.log("Auth token acquired");
-    chrome.storage.local.set({ authToken: token });
-    fetchReceiptEmails(token);
-  });
+  );
 });
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log("Message received:", message);
   if (message.action === "refreshEmails") {
@@ -20,27 +35,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (authToken) {
         fetchReceiptEmails(authToken);
       } else {
-        chrome.identity.getAuthToken({ interactive: true }, (newToken) => {
-          if (chrome.runtime.lastError) {
-            console.error("Auth error:", chrome.runtime.lastError.message);
-            return;
+        chrome.identity.getAuthToken(
+          {
+            interactive: true,
+            scopes: [
+              "https://www.googleapis.com/auth/gmail.readonly",
+              "https://www.googleapis.com/auth/gmail.modify",
+            ],
+          },
+          (newToken) => {
+            if (chrome.runtime.lastError) {
+              console.error("Auth error:", chrome.runtime.lastError.message);
+              return;
+            }
+            chrome.storage.local.set({ authToken: newToken });
+            fetchReceiptEmails(newToken);
           }
-          chrome.storage.local.set({ authToken: newToken });
-          fetchReceiptEmails(newToken);
-        });
+        );
       }
     });
     sendResponse({ status: "Processing" });
   }
   return true;
 });
+
 async function fetchReceiptEmails(token) {
   console.log("Fetching emails...");
   try {
     const oneMonthAgo = new Date();
     oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
     const afterDate = oneMonthAgo.toISOString().split("T")[0];
-    const query = `subject:(receipt OR order OR invoice OR confirmation) OR from:(amazon.com OR swiggy.in OR zomato.com OR uber.com OR flipkart.com OR ola.com OR blinkit.com OR myntra.com OR ajio.com OR spotify.com OR paypal OR stripe OR apple.com) after:${afterDate}`;
+    const query = `subject:(receipt OR order OR invoice OR confirmation) OR from:(amazon.com OR swiggy.in OR zomato.com OR uber.com OR flipkart.com OR ola.com OR blinkit.com OR myntra.com OR ajio.com) after:${afterDate}`;
     const response = await fetch(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(
         query
@@ -56,7 +81,11 @@ async function fetchReceiptEmails(token) {
     if (data.messages) {
       const emails = await fetchEmailDetails(data.messages, token);
       const geminiApiKey = "AIzaSyAqMWwrIIM_NQpZ6UjTsbqWu2xKz8DHxes";
-      const extractedData = await parseEmailsWithGemini(emails, geminiApiKey);
+      const extractedData = await parseEmailsWithGemini(
+        emails,
+        geminiApiKey,
+        token
+      );
       chrome.storage.local.set(
         { extractedData, lastScanned: Date.now() },
         () => {
@@ -68,7 +97,7 @@ async function fetchReceiptEmails(token) {
       chrome.storage.local.set({ extractedData: [], lastScanned: Date.now() });
     }
   } catch (error) {
-    console.error("Error fetching emails:", error);
+    console.error("Error fetching emails:", error.message);
     chrome.storage.local.set({
       extractedData: [],
       lastScanned: Date.now(),
@@ -76,6 +105,7 @@ async function fetchReceiptEmails(token) {
     });
   }
 }
+
 async function fetchEmailDetails(messages, token) {
   const emails = [];
   for (let i = 0; i < messages.length; i++) {
@@ -102,13 +132,17 @@ async function fetchEmailDetails(messages, token) {
       const emailData = await response.json();
       emails.push(emailData);
     } catch (error) {
-      console.error(`Error fetching email ${messages[i].id}:`, error);
+      console.error(`Error fetching email ${messages[i].id}:`, error.message);
     }
   }
   return emails;
 }
-async function parseEmailsWithGemini(emails, apiKey) {
+
+async function parseEmailsWithGemini(emails, apiKey, token) {
   const extractedData = [];
+  let apiCallCount = 0;
+  const MAX_API_CALLS_PER_MINUTE = 8; // Stay under the 10/min limit
+
   for (let email of emails) {
     const body = decodeEmailBody(email);
     const htmlContent = extractHTMLContent(email);
@@ -125,13 +159,12 @@ async function parseEmailsWithGemini(emails, apiKey) {
     console.log("HTML length:", htmlContent.length);
     console.log("Images found:", images.length);
 
-    // Skip promotional emails
-    if (isPromotionalEmail(subject, htmlContent)) {
+    // IMPROVED: Better promotional email detection
+    if (isPromotionalEmail(subject, htmlContent, from)) {
       console.log("⊘ Skipping promotional email");
       continue;
     }
 
-    // extract from HTML structure first
     const htmlExtracted = extractFromHTML(htmlContent, subject, from, date);
     if (htmlExtracted) {
       console.log("✓ Extracted from HTML structure:", htmlExtracted);
@@ -143,49 +176,72 @@ async function parseEmailsWithGemini(emails, apiKey) {
     }
 
     try {
+      // Add delay between processing to avoid rate limits
+      if (apiCallCount >= MAX_API_CALLS_PER_MINUTE) {
+        console.log("⏳ Rate limit protection: waiting 60 seconds...");
+        await new Promise((resolve) => setTimeout(resolve, 60000));
+        apiCallCount = 0;
+      }
+
       await new Promise((resolve) => setTimeout(resolve, 500));
 
       let data;
 
-      // Priority 1: Use HTML extraction if successful
-      if (htmlExtracted && htmlExtracted.amount > 0) {
-        console.log("Using HTML extracted data");
+      // STRATEGY: Try HTML extraction first, then fallback to AI only if needed
+      // This reduces API calls and avoids rate limits
+
+      if (htmlExtracted && htmlExtracted.amount >= 10) {
+        console.log("✓ Using HTML extracted data");
         data = htmlExtracted;
-      }
-      // Priority 2: If images found, use vision model
-      else if (images.length > 0) {
+      } else if (images.length > 0) {
         console.log("Using vision model for image analysis...");
-        data = await analyzeReceiptImage(
-          images[0],
+        const imageData = await getImageData(images[0], email.id, token);
+        if (imageData) {
+          data = await analyzeReceiptImage(
+            imageData,
+            subject,
+            from,
+            date,
+            apiKey
+          );
+          apiCallCount++; // Count AI API calls
+        }
+      } else {
+        // Try more aggressive HTML/text extraction before using AI
+        console.log("Attempting aggressive text extraction...");
+        const fallbackData = extractFromPlainText(
+          body || htmlContent,
           subject,
           from,
-          date,
-          apiKey
+          date
         );
-      }
-      // Priority 3: Use text-only model with HTML content
-      else if (htmlContent) {
-        console.log("Using AI for HTML content analysis...");
-        const receiptContent = extractReceiptContent(htmlContent, body);
-        data = await analyzeReceiptText(
-          receiptContent,
-          subject,
-          from,
-          date,
-          apiKey
-        );
-      }
-      // Priority 4: Use plain text body
-      else {
-        console.log("Using AI for text body analysis...");
-        const receiptContent = extractReceiptContent(null, body);
-        data = await analyzeReceiptText(
-          receiptContent,
-          subject,
-          from,
-          date,
-          apiKey
-        );
+
+        if (fallbackData && fallbackData.amount >= 10) {
+          console.log("✓ Using aggressive text extraction");
+          data = fallbackData;
+        } else if (htmlContent) {
+          console.log("Using AI for HTML content analysis...");
+          const truncatedHTML = htmlContent.substring(0, 8000);
+          data = await analyzeReceiptText(
+            truncatedHTML,
+            subject,
+            from,
+            date,
+            apiKey
+          );
+          apiCallCount++; // Count AI API calls
+        } else if (body) {
+          console.log("Using AI for text body analysis...");
+          const truncatedBody = body.substring(0, 5000);
+          data = await analyzeReceiptText(
+            truncatedBody,
+            subject,
+            from,
+            date,
+            apiKey
+          );
+          apiCallCount++; // Count AI API calls
+        }
       }
 
       if (!data) {
@@ -195,15 +251,17 @@ async function parseEmailsWithGemini(emails, apiKey) {
 
       console.log("Parsed data:", data);
 
-      // Skip if default response
       if (data.amount === 0 && data.merchant === "Unknown") {
         console.warn("⊘ Skipping - looks like default/empty data");
         continue;
       }
 
-      // Skip if amount is 0
-      if (data.amount === 0) {
-        console.warn("⊘ Skipping - zero amount (likely promotional)");
+      // FIXED: Skip very small amounts (likely page numbers or noise)
+      if (data.amount < 10 && data.amount > 0) {
+        console.warn(
+          "⊘ Skipping - amount too small, likely noise:",
+          data.amount
+        );
         continue;
       }
 
@@ -241,19 +299,68 @@ async function parseEmailsWithGemini(emails, apiKey) {
   return extractedData;
 }
 
+// NEW: Fetch attachment data if needed
+async function getImageData(imageInfo, messageId, token) {
+  if (imageInfo.data) {
+    // Already have inline data
+    return imageInfo;
+  }
+
+  if (imageInfo.attachmentId) {
+    try {
+      console.log("Fetching attachment:", imageInfo.attachmentId);
+      const response = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/attachments/${imageInfo.attachmentId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (!response.ok) {
+        console.error("Failed to fetch attachment:", response.status);
+        return null;
+      }
+
+      const attachmentData = await response.json();
+      return {
+        mimeType: imageInfo.mimeType,
+        data: attachmentData.data.replace(/-/g, "+").replace(/_/g, "/"),
+        filename: imageInfo.filename,
+      };
+    } catch (error) {
+      console.error("Error fetching attachment:", error);
+      return null;
+    }
+  }
+
+  return null;
+}
+
 async function analyzeReceiptImage(imageData, subject, from, date, apiKey) {
-  const prompt = `Extract receipt data from this image. Return ONLY JSON.
+  if (!imageData || !imageData.mimeType || !imageData.data) {
+    console.warn("No valid image data available, skipping vision analysis");
+    return null;
+  }
 
-Context: ${subject} | ${from} | ${date}
+  const prompt = `Analyze this receipt image and extract transaction details. Return ONLY valid JSON with no markdown or extra text.
 
-Extract:
-- merchant: Company name
-- date: Transaction date (YYYY-MM-DD)
-- amount: Total amount (number with decimals)
-- category: "food", "groceries", "shopping", "travel", "entertainment", "other"
-- currency: "INR" or "USD"
+Context:
+- Email Subject: ${subject}
+- From: ${from}
+- Email Date: ${date}
 
-Return ONLY JSON: {"merchant": "...", "date": "...", "amount": 75.75, "category": "...", "currency": "INR"}`;
+Extract these fields from the receipt image:
+- merchant: Company/store name
+- date: Transaction date in YYYY-MM-DD format (look for order date, purchase date, trip date)
+- amount: Total amount paid as a number with 2 decimal places (e.g., 414.20 not 7)
+- category: One of: "food", "groceries", "shopping", "travel", "entertainment", "other"
+- currency: "INR" for ₹/Rs or "USD" for $
+
+Rules:
+- Look carefully at the receipt for FULL total amount including decimals
+- Use the transaction date from the receipt, not the email date
+- If merchant not clear from image, extract from email sender
+- Return ONLY JSON: {"merchant": "...", "date": "...", "amount": 414.20, "category": "...", "currency": "INR"}
+
+Example: {"merchant": "Uber", "date": "2025-09-15", "amount": 245.50, "category": "travel", "currency": "INR"}`;
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`,
@@ -277,7 +384,7 @@ Return ONLY JSON: {"merchant": "...", "date": "...", "amount": 75.75, "category"
         generationConfig: {
           temperature: 0.1,
           topP: 0.8,
-          maxOutputTokens: 150,
+          maxOutputTokens: 300,
         },
       }),
     }
@@ -302,30 +409,43 @@ Return ONLY JSON: {"merchant": "...", "date": "...", "amount": 75.75, "category"
     .replace(/```\n?/g, "")
     .trim();
 
-  console.log("Vision AI Response:", aiResponse);
+  if (!aiResponse.match(/^\s*\{(?:[^{}]|(?:\{[^{}]*\}[^{}]*))*\}\s*$/)) {
+    console.warn("Non-JSON response from vision, skipping:", aiResponse);
+    return null;
+  }
 
+  console.log("Vision AI Response:", aiResponse);
   return JSON.parse(aiResponse);
 }
 
-async function analyzeReceiptText(body, subject, from, date, apiKey) {
-  const prompt = `Extract receipt data from this content. Return ONLY JSON.
-
-Subject: ${subject}
-From: ${from}
-Date: ${date}
-Content: ${body}
-
-Extract:
-- merchant: Company name
-- date: Transaction date (YYYY-MM-DD)
-- amount: Total amount (number with decimals)
-- category: "food", "groceries", "shopping", "travel", "entertainment", "other"
-- currency: "INR" or "USD"
+async function analyzeReceiptText(
+  body,
+  subject,
+  from,
+  date,
+  apiKey,
+  retryCount = 0
+) {
+  const prompt = `You are an AI designed to extract receipt/order details from email text. Return ONLY a valid JSON object with NO additional text, explanations, markdown, or narrative. Extract the following fields:
+- merchant: The company/store name (e.g., "Amazon", "Swiggy", "Uber") or sender domain if unclear
+- date: The ACTUAL transaction/order date in YYYY-MM-DD format (NOT the email received date unless no other date is found)
+- amount: The total amount as a number with decimals (e.g., 414.20) from "Total", "Amount Paid", etc.
+- category: One of: "food", "groceries", "shopping", "travel", "entertainment", "other"
+- currency: "INR" if ₹/Rs/INR found, "USD" if $/USD found, "INR" if unclear
 
 Rules:
-- Use transaction date, not email date
-- Extract FULL amount with decimals
-- Return ONLY JSON: {"merchant": "...", "date": "...", "amount": 75.75, "category": "...", "currency": "INR"}`;
+- If merchant is unclear, use the sender domain (from email) or "Unknown"
+- If date is missing, use "${date}"
+- If amount is missing or unclear, use 0
+- Output MUST be a single JSON object with exactly these fields
+- Do NOT include any text outside the JSON object
+
+Email Subject: ${subject}
+From: ${from}
+Email Date: ${date}
+Body: ${body}
+
+Example: {"merchant": "Uber", "date": "2025-10-03", "amount": 245.50, "category": "travel", "currency": "INR"}`;
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`,
@@ -335,9 +455,9 @@ Rules:
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {
-          temperature: 0.1,
+          temperature: 0.0,
           topP: 0.8,
-          maxOutputTokens: 100,
+          maxOutputTokens: 200,
         },
       }),
     }
@@ -345,6 +465,26 @@ Rules:
 
   if (!response.ok) {
     const errorText = await response.text();
+
+    // Handle rate limiting with retry
+    if (response.status === 429 && retryCount < 3) {
+      const retryAfter = 20; // Wait 20 seconds for rate limit
+      console.warn(
+        `Rate limited. Retrying in ${retryAfter}s... (attempt ${
+          retryCount + 1
+        }/3)`
+      );
+      await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000));
+      return analyzeReceiptText(
+        body,
+        subject,
+        from,
+        date,
+        apiKey,
+        retryCount + 1
+      );
+    }
+
     console.error(`Gemini API error ${response.status}:`, errorText);
     return null;
   }
@@ -362,9 +502,32 @@ Rules:
     .replace(/```\n?/g, "")
     .trim();
 
-  console.log("Text AI Response:", aiResponse);
+  if (!aiResponse.match(/^\s*\{(?:[^{}]|(?:\{[^{}]*\}[^{}]*))*\}\s*$/)) {
+    console.warn("Non-JSON response, attempting to extract:", aiResponse);
+    const jsonMatch = aiResponse.match(
+      /^\s*\{(?:[^{}]|(?:\{[^{}]*\}[^{}]*))*\}\s*$/
+    );
+    if (jsonMatch) {
+      aiResponse = jsonMatch[0].trim();
+    } else {
+      console.error("No valid JSON found in response");
+      return null;
+    }
+  }
 
-  return JSON.parse(aiResponse);
+  try {
+    const data = JSON.parse(aiResponse);
+    console.log("Text AI Response:", aiResponse);
+    return data;
+  } catch (e) {
+    console.warn(
+      "Extracted JSON is invalid, falling back:",
+      e.message,
+      "Response:",
+      aiResponse
+    );
+    return null;
+  }
 }
 
 function extractHTMLContent(email) {
@@ -384,34 +547,22 @@ function extractHTMLContent(email) {
   }
   return findHTML(parts) || "";
 }
-function isPromotionalEmail(subject, html) {
-  const promoKeywords = [
-    /want \d+% off/i,
-    /save up to/i,
-    /get \d+% off/i,
-    /discount/i,
-    /promo/i,
-    /offer/i,
-    /don't miss/i,
-    /limited time/i,
-    /special deal/i,
-    /exclusive/i,
-  ];
-  const subjectLower = subject.toLowerCase();
-  for (let keyword of promoKeywords) {
-    if (keyword.test(subjectLower)) {
-      return true;
-    }
-  }
-  if (/receipt|invoice|order|trip with|your.*trip/i.test(subject)) {
-    return false;
-  }
-  return false;
-}
-function extractFromHTML(html, subject, from, emailDate) {
-  if (!html) return null;
+
+// NEW: Aggressive plain text extraction function
+function extractFromPlainText(text, subject, from, emailDate) {
+  if (!text) return null;
+
   try {
-    // Extract merchant
+    // Convert HTML to plain text if needed
+    const plainText = text
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/\s+/g, " ")
+      .trim();
+
     let merchant = "Unknown";
     const merchantPatterns = [
       /uber/i,
@@ -431,51 +582,255 @@ function extractFromHTML(html, subject, from, emailDate) {
         break;
       }
     }
+
+    let currency = "INR";
+    if (
+      plainText.includes("₹") ||
+      /rs\.?/i.test(plainText) ||
+      /inr/i.test(plainText)
+    )
+      currency = "INR";
+    else if (plainText.includes("$") || /usd/i.test(plainText))
+      currency = "USD";
+
+    // Look for amounts with various formats
+    const amounts = [];
     const amountPatterns = [
-      /(?:total|grand total|amount paid|bill amount|fare|trip total|order total)[:\s]*(?:₹|rs\.?|inr)?\s*([0-9,]+\.?[0-9]{0,2})/gi,
-      /₹\s*([0-9,]+\.[0-9]{2})/g,
-      /rs\.?\s*([0-9,]+\.[0-9]{2})/gi,
-      /₹\s*([0-9,]+\.?[0-9]*)/g,
-      /rs\.?\s*([0-9,]+\.?[0-9]*)/gi,
-      /inr\s*([0-9,]+\.?[0-9]*)/gi,
-      /\$\s*([0-9,]+\.[0-9]{2})/g,
-      /usd\s*([0-9,]+\.?[0-9]*)/gi,
+      // Priority patterns with explicit labels
+      /(?:total\s*paid|total\s*fare|total\s*amount|grand\s*total|amount\s*paid|you\s*paid|trip\s*total|bill\s*amount|order\s*total)[:\s]*(₹|rs\.?|inr|\$)?\s*([\d,]+\.[\d]{2})/gi,
+      // Standalone amounts near keywords
+      /(?:total|paid|fare|amount|charge|bill)[^\d]{0,30}(₹|rs\.?|inr|\$)\s*([\d,]+\.[\d]{2})/gi,
+      /(?:total|paid|fare|amount|charge|bill)[^\d]{0,30}([\d,]+\.[\d]{2})\s*(₹|rs\.?|inr|\$)?/gi,
     ];
+
+    for (let pattern of amountPatterns) {
+      let match;
+      while ((match = pattern.exec(plainText)) !== null) {
+        // Extract amount - could be in match[2] or match[1] depending on pattern
+        const amountStr = (match[2] || match[1]).replace(/,/g, "");
+        const amount = parseFloat(amountStr);
+
+        if (amount >= 10 && amount < 100000) {
+          const hasLabel = /total|paid|fare|amount/i.test(
+            match[0].substring(0, 30)
+          );
+          const priority = hasLabel ? 3 : 1;
+
+          amounts.push({
+            value: amount,
+            priority: priority,
+            source: match[0].substring(0, 50),
+          });
+        }
+      }
+    }
+
+    console.log(
+      "Plain text amounts found:",
+      amounts.map((a) => `₹${a.value} [P${a.priority}]`)
+    );
+
+    let category = "other";
+    if (/uber|ola|taxi|cab|ride/i.test(plainText) || /uber|ola/i.test(from))
+      category = "travel";
+    else if (
+      /swiggy|zomato|food|restaurant|delivery/i.test(plainText) ||
+      /swiggy|zomato/i.test(from)
+    )
+      category = "food";
+    else if (
+      /amazon|flipkart|shopping|order|product/i.test(plainText) ||
+      /amazon|flipkart/i.test(from)
+    )
+      category = "shopping";
+    else if (/blinkit|grofer|grocery/i.test(plainText)) category = "groceries";
+
+    if (amounts.length > 0) {
+      amounts.sort((a, b) => b.priority - a.priority || b.value - a.value);
+      const bestAmount = amounts[0];
+      console.log(
+        "✓ Plain text extracted:",
+        bestAmount.value,
+        "from:",
+        bestAmount.source
+      );
+
+      return {
+        merchant,
+        date: emailDate,
+        amount: bestAmount.value,
+        category,
+        currency,
+      };
+    }
+
+    return null;
+  } catch (error) {
+    console.error("Error in plain text extraction:", error);
+    return null;
+  }
+}
+
+// IMPROVED: Better promotional email detection
+function isPromotionalEmail(subject, html, from) {
+  const promoKeywords = [
+    /want \d+% off/i,
+    /save up to/i,
+    /get \d+% off/i,
+    /discount/i,
+    /limited time/i,
+    /special deal/i,
+    /exclusive offer/i,
+  ];
+
+  // Concert/event emails from Spotify
+  if (
+    from.includes("spotify.com") &&
+    (subject.toLowerCase().includes("concert") ||
+      subject.toLowerCase().includes("live:") ||
+      subject.toLowerCase().includes("tour"))
+  ) {
+    return true;
+  }
+
+  // Recruitment/job application emails (no financial transactions)
+  if (
+    subject.toLowerCase().includes("application") ||
+    subject.toLowerCase().includes("consent received") ||
+    subject.toLowerCase().includes("position at") ||
+    subject.toLowerCase().includes("job") ||
+    subject.toLowerCase().includes("recruitment")
+  ) {
+    return true;
+  }
+
+  const subjectLower = subject.toLowerCase();
+  for (let keyword of promoKeywords) {
+    if (keyword.test(subjectLower)) {
+      return true;
+    }
+  }
+
+  // Strong receipt indicators override promo detection
+  if (
+    /receipt|invoice|order confirmation|trip with|your.*trip|payment received/i.test(
+      subject
+    )
+  ) {
+    return false;
+  }
+
+  return false;
+}
+
+// IMPROVED: Better HTML amount extraction
+function extractFromHTML(html, subject, from, emailDate) {
+  if (!html) return null;
+  try {
+    let merchant = "Unknown";
+    const merchantPatterns = [
+      /uber/i,
+      /swiggy/i,
+      /zomato/i,
+      /amazon/i,
+      /flipkart/i,
+      /ola/i,
+      /blinkit/i,
+      /myntra/i,
+      /ajio/i,
+    ];
+    for (let pattern of merchantPatterns) {
+      if (pattern.test(from) || pattern.test(subject)) {
+        merchant = pattern.source.replace(/[\/\\^$*+?.()|[\]{}]/g, "");
+        merchant = merchant.charAt(0).toUpperCase() + merchant.slice(1);
+        break;
+      }
+    }
+
     let amounts = [];
     let currency = "INR";
-    if (html.includes("₹") || /rs\.?/i.test(html) || /inr/i.test(html)) {
+    if (html.includes("₹") || /rs\.?/i.test(html) || /inr/i.test(html))
       currency = "INR";
-    } else if (html.includes("$") || /usd/i.test(html)) {
-      currency = "USD";
-    }
+    else if (html.includes("$") || /usd/i.test(html)) currency = "USD";
+
+    // IMPROVED: More precise amount patterns that avoid URLs
+    const amountPatterns = [
+      // High priority: explicit labels with amounts (various formats)
+      /(?:total paid|grand total|total amount|order total|trip total|amount paid|bill amount|you paid|total fare|fare)[\s:]*(?:₹|rs\.?|inr)?\s*([\d,]+\.[\d]{2})/gi,
+      /(?:total paid|grand total|total amount|order total|trip total|amount paid|bill amount|you paid|total fare|fare)[\s:]*\$\s*([\d,]+\.[\d]{2})/gi,
+
+      // Medium priority: currency symbols with spaces/formatting variations
+      /(?:₹|rs\.?|inr)\s*([\d,]+\.[\d]{2})/gi,
+      /\$\s*([\d,]+\.[\d]{2})/gi,
+
+      // Lower priority: standalone decimal amounts near financial keywords (within 100 chars)
+      /(?:total|paid|amount|fare|charge)[^\d₹$]{0,50}([\d,]+\.[\d]{2})/gi,
+    ];
+
     for (let pattern of amountPatterns) {
       let match;
       while ((match = pattern.exec(html)) !== null) {
         const amountStr = match[1].replace(/,/g, "");
         const amount = parseFloat(amountStr);
-        if (amount > 0 && amount < 1000000) {
+
+        // Only accept reasonable amounts (₹10 to ₹100,000)
+        if (amount >= 10 && amount < 100000) {
           const hasDecimals =
             amountStr.includes(".") && amountStr.split(".")[1].length === 2;
-          amounts.push({
-            value: amount,
-            priority: hasDecimals ? 2 : 1,
-            source: match[0],
-          });
+
+          // Get context around the match (100 chars before and after)
+          const contextStart = Math.max(0, match.index - 100);
+          const contextEnd = Math.min(
+            html.length,
+            match.index + match[0].length + 100
+          );
+          const context = html.substring(contextStart, contextEnd);
+
+          // Check if it's in a URL or href attribute
+          const isInUrl =
+            /https?:\/\/[^\s"'<>]{0,100}/.test(context) ||
+            /href=["'][^"']{0,100}/.test(context) ||
+            /src=["'][^"']{0,100}/.test(context);
+
+          if (!isInUrl) {
+            // Determine priority based on pattern and context
+            let priority = 1;
+            if (
+              match[0].match(
+                /total paid|grand total|total amount|trip total|you paid|total fare/i
+              )
+            ) {
+              priority = 3; // Highest priority for explicit total labels
+            } else if (hasDecimals) {
+              priority = 2; // Medium priority for amounts with decimals
+            }
+
+            amounts.push({
+              value: amount,
+              priority: priority,
+              source: match[0],
+              context: context.substring(0, 80), // Store snippet for debugging
+            });
+          }
         }
       }
     }
+
     console.log(
       "Found amounts in HTML:",
-      amounts.map((a) => `${a.value} (${a.source.substring(0, 50)})`)
+      amounts.map(
+        (a) => `₹${a.value} [P${a.priority}] (${a.source.substring(0, 30)})`
+      )
     );
+
     let transactionDate = emailDate;
-    const contextualDatePatterns = [
+    const datePatterns = [
       /(?:trip|order|purchased|delivered|paid)\s+(?:on|at)?\s*(\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/gi,
       /(?:trip|order|purchased|delivered|paid)\s+(?:on|at)?\s*((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:,?\s+\d{4})?)/gi,
       /trip date[:\s]*(\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/gi,
       /order date[:\s]*(\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/gi,
     ];
-    for (let pattern of contextualDatePatterns) {
+    for (let pattern of datePatterns) {
       const match = pattern.exec(html);
       if (match && match[1]) {
         try {
@@ -497,55 +852,24 @@ function extractFromHTML(html, subject, from, emailDate) {
         } catch (e) {}
       }
     }
-    if (transactionDate === emailDate) {
-      const genericDatePatterns = [
-        /(\d{4}[-\/]\d{1,2}[-\/]\d{1,2})/g,
-        /(\d{1,2}[-\/]\d{1,2}[-\/]\d{4})/g,
-        /((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4})/gi,
-      ];
-      let foundDates = [];
-      for (let pattern of genericDatePatterns) {
-        let match;
-        while ((match = pattern.exec(html)) !== null) {
-          try {
-            const parsed = new Date(match[1]);
-            if (
-              !isNaN(parsed.getTime()) &&
-              parsed <= new Date() &&
-              parsed.getFullYear() >= 2024
-            ) {
-              foundDates.push(parsed);
-            }
-          } catch (e) {}
-        }
-      }
 
-      if (foundDates.length > 0) {
-        foundDates.sort((a, b) => b - a);
-        transactionDate = foundDates[0].toISOString().split("T")[0];
-      }
-    }
     let category = "other";
-    if (/uber|ola|taxi|cab|ride/i.test(html) || /uber|ola/i.test(from)) {
+    if (/uber|ola|taxi|cab|ride/i.test(html) || /uber|ola/i.test(from))
       category = "travel";
-    } else if (
+    else if (
       /swiggy|zomato|food|restaurant|delivery/i.test(html) ||
       /swiggy|zomato/i.test(from)
-    ) {
+    )
       category = "food";
-    } else if (
+    else if (
       /amazon|flipkart|shopping|order|product/i.test(html) ||
       /amazon|flipkart/i.test(from)
-    ) {
+    )
       category = "shopping";
-    } else if (/blinkit|grocery/i.test(html)) {
-      category = "groceries";
-    }
+    else if (/blinkit|grofer|grocery/i.test(html)) category = "groceries";
+
     if (amounts.length > 0) {
-      amounts.sort((a, b) => {
-        if (a.priority !== b.priority) return b.priority - a.priority;
-        return b.value - a.value;
-      });
+      amounts.sort((a, b) => b.priority - a.priority || b.value - a.value);
       const bestAmount = amounts[0];
       console.log(
         "Selected amount:",
@@ -561,37 +885,99 @@ function extractFromHTML(html, subject, from, emailDate) {
         currency,
       };
     }
+
+    // FALLBACK: If no amounts found but looks like a receipt, try aggressive plain text extraction
+    if (/receipt|invoice|trip|order/i.test(subject)) {
+      console.log("Trying fallback plain text extraction...");
+      const plainText = html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
+
+      // Look for common receipt amount patterns in plain text
+      const fallbackPatterns = [
+        /total[:\s]*(₹|rs\.?|inr)?\s*([\d,]+\.[\d]{2})/gi,
+        /paid[:\s]*(₹|rs\.?|inr)?\s*([\d,]+\.[\d]{2})/gi,
+        /amount[:\s]*(₹|rs\.?|inr)?\s*([\d,]+\.[\d]{2})/gi,
+        /fare[:\s]*(₹|rs\.?|inr)?\s*([\d,]+\.[\d]{2})/gi,
+      ];
+
+      const fallbackAmounts = [];
+      for (let pattern of fallbackPatterns) {
+        let match;
+        while ((match = pattern.exec(plainText)) !== null) {
+          const amountStr = match[2].replace(/,/g, "");
+          const amount = parseFloat(amountStr);
+          if (amount >= 10 && amount < 100000) {
+            fallbackAmounts.push({
+              value: amount,
+              source: match[0],
+            });
+          }
+        }
+      }
+
+      if (fallbackAmounts.length > 0) {
+        // Take the largest amount as likely total
+        fallbackAmounts.sort((a, b) => b.value - a.value);
+        const fallbackAmount = fallbackAmounts[0];
+        console.log(
+          "✓ Fallback extracted:",
+          fallbackAmount.value,
+          "from:",
+          fallbackAmount.source
+        );
+        return {
+          merchant,
+          date: transactionDate,
+          amount: fallbackAmount.value,
+          category,
+          currency,
+        };
+      }
+    }
+
     return null;
   } catch (error) {
     console.error("Error extracting from HTML:", error);
     return null;
   }
 }
+
 function extractImagesFromEmail(email) {
   const images = [];
   const parts = email.payload.parts || [email.payload];
   function processParts(parts) {
     for (let part of parts) {
-      if (part.mimeType && part.mimeType.startsWith("image/")) {
+      if (
+        part.mimeType &&
+        (part.mimeType.startsWith("image/") ||
+          part.mimeType === "application/pdf")
+      ) {
         if (part.body?.attachmentId) {
-          console.log("Found image attachment:", part.filename);
+          console.log("Found attachment:", part.filename, part.mimeType);
+          images.push({
+            mimeType: part.mimeType,
+            attachmentId: part.body.attachmentId,
+            filename: part.filename,
+          });
         } else if (part.body?.data) {
           images.push({
             mimeType: part.mimeType,
             data: part.body.data.replace(/-/g, "+").replace(/_/g, "/"),
             filename: part.filename || "inline",
           });
-          console.log("Found inline image:", part.filename || "inline");
+          console.log(
+            "Found inline content:",
+            part.filename || "inline",
+            part.mimeType
+          );
         }
       }
-      if (part.parts) {
-        processParts(part.parts);
-      }
+      if (part.parts) processParts(part.parts);
     }
   }
   processParts(parts);
   return images;
 }
+
 function decodeEmailBody(email) {
   const parts = email.payload.parts || [email.payload];
   for (let part of parts) {
@@ -638,6 +1024,7 @@ function decodeEmailBody(email) {
   }
   return "";
 }
+
 function decodeEmailBodyFromParts(parts) {
   for (let part of parts) {
     if (part.mimeType === "text/plain" && part.body?.data) {
@@ -646,16 +1033,19 @@ function decodeEmailBodyFromParts(parts) {
   }
   return null;
 }
+
 function getEmailSubject(email) {
   const headers = email.payload.headers;
   const subjectHeader = headers.find((h) => h.name.toLowerCase() === "subject");
   return subjectHeader?.value || "";
 }
+
 function getEmailFrom(email) {
   const headers = email.payload.headers;
   const fromHeader = headers.find((h) => h.name.toLowerCase() === "from");
   return fromHeader?.value || "";
 }
+
 function getEmailDate(email) {
   const headers = email.payload.headers;
   const dateHeader = headers.find((h) => h.name.toLowerCase() === "date");
@@ -671,6 +1061,7 @@ function getEmailDate(email) {
   }
   return new Date().toISOString().split("T")[0];
 }
+
 function extractMerchantFromEmail(from, subject) {
   const emailMatch = from.match(/@([^.]+)\./);
   if (emailMatch) {
@@ -692,18 +1083,16 @@ function extractMerchantFromEmail(from, subject) {
   }
   return "Unknown";
 }
+
 function validateDate(dateStr, fallbackDate) {
   if (!dateStr) return fallbackDate || new Date().toISOString().split("T")[0];
   const date = new Date(dateStr);
-  if (isNaN(date.getTime())) {
+  if (isNaN(date.getTime()) || date > new Date()) {
     return fallbackDate || new Date().toISOString().split("T")[0];
   }
-
-  if (date > new Date()) {
-    return fallbackDate || new Date().toISOString().split("T")[0];
-  }
-  return dateStr;
+  return date.toISOString().split("T")[0];
 }
+
 function validateCategory(category) {
   const validCategories = [
     "food",
@@ -717,157 +1106,4 @@ function validateCategory(category) {
     .toLowerCase()
     .trim();
   return validCategories.includes(cat) ? cat : "other";
-}
-
-function extractReceiptContent(htmlContent, plainText) {
-  // Priority 1: Extract from HTML if available
-  if (htmlContent) {
-    const htmlReceipt = extractReceiptFromHTML(htmlContent);
-    if (htmlReceipt) {
-      console.log("Extracted receipt content from HTML:", htmlReceipt.length, "chars");
-      return htmlReceipt;
-    }
-  }
-  
-  // Priority 2: Extract from plain text
-  if (plainText) {
-    const textReceipt = extractReceiptFromText(plainText);
-    if (textReceipt) {
-      console.log("Extracted receipt content from text:", textReceipt.length, "chars");
-      return textReceipt;
-    }
-  }
-  
-  // Fallback: return truncated content
-  const content = htmlContent || plainText || "";
-  return content.substring(0, 2000); // Much smaller fallback
-}
-
-function extractReceiptFromHTML(html) {
-  try {
-    // Remove script tags, style tags, and other non-content elements
-    let cleanHtml = html
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '')
-      .replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, '')
-      .replace(/<object[^>]*>[\s\S]*?<\/object>/gi, '')
-      .replace(/<embed[^>]*>[\s\S]*?<\/embed>/gi, '');
-    
-    // Look for receipt-specific sections
-    const receiptPatterns = [
-      /<div[^>]*class="[^"]*(?:receipt|invoice|order|bill|payment|total|amount)[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
-      /<table[^>]*class="[^"]*(?:receipt|invoice|order|bill|payment|total|amount)[^"]*"[^>]*>[\s\S]*?<\/table>/gi,
-      /<section[^>]*class="[^"]*(?:receipt|invoice|order|bill|payment|total|amount)[^"]*"[^>]*>[\s\S]*?<\/section>/gi,
-      /<div[^>]*id="[^"]*(?:receipt|invoice|order|bill|payment|total|amount)[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
-    ];
-    
-    for (let pattern of receiptPatterns) {
-      const matches = cleanHtml.match(pattern);
-      if (matches && matches.length > 0) {
-        const receiptSection = matches.join('\n');
-        // Extract text content from the receipt section
-        const textContent = receiptSection
-          .replace(/<[^>]*>/g, ' ')
-          .replace(/&nbsp;/g, ' ')
-          .replace(/&amp;/g, '&')
-          .replace(/&lt;/g, '<')
-          .replace(/&gt;/g, '>')
-          .replace(/\s+/g, ' ')
-          .trim();
-        
-        if (textContent.length > 50) {
-          return textContent;
-        }
-      }
-    }
-    
-    // If no specific receipt sections found, look for tables with financial data
-    const tablePattern = /<table[^>]*>[\s\S]*?(?:total|amount|price|₹|rs\.?|\$)[\s\S]*?<\/table>/gi;
-    const tableMatches = cleanHtml.match(tablePattern);
-    if (tableMatches && tableMatches.length > 0) {
-      const tableContent = tableMatches.join('\n')
-        .replace(/<[^>]*>/g, ' ')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .replace(/\s+/g, ' ')
-        .trim();
-      
-      if (tableContent.length > 30) {
-        return tableContent;
-      }
-    }
-    
-    // Fallback: extract content around financial keywords
-    const financialKeywords = /(?:total|amount|price|₹|rs\.?|\$|order|receipt|invoice|bill|payment)/gi;
-    const lines = cleanHtml.split('\n');
-    const relevantLines = [];
-    
-    for (let line of lines) {
-      if (financialKeywords.test(line) || 
-          /₹\s*\d+|\$\s*\d+|rs\.?\s*\d+|\d+\.\d{2}/.test(line)) {
-        const cleanLine = line
-          .replace(/<[^>]*>/g, ' ')
-          .replace(/&nbsp;/g, ' ')
-          .replace(/&amp;/g, '&')
-          .replace(/\s+/g, ' ')
-          .trim();
-        
-        if (cleanLine.length > 10) {
-          relevantLines.push(cleanLine);
-        }
-      }
-    }
-    
-    if (relevantLines.length > 0) {
-      return relevantLines.join('\n');
-    }
-    
-  } catch (error) {
-    console.error("Error extracting receipt from HTML:", error);
-  }
-  
-  return null;
-}
-
-function extractReceiptFromText(text) {
-  try {
-    const lines = text.split('\n');
-    const relevantLines = [];
-    
-    // Keywords that indicate receipt content
-    const receiptKeywords = [
-      'total', 'amount', 'price', 'order', 'receipt', 'invoice', 'bill', 'payment',
-      'subtotal', 'tax', 'delivery', 'service', 'fare', 'trip', 'booking'
-    ];
-    
-    // Currency patterns
-    const currencyPattern = /(?:₹|rs\.?|\$|usd|inr)\s*\d+(?:\.\d{2})?/i;
-    
-    for (let line of lines) {
-      const lowerLine = line.toLowerCase();
-      
-      // Check if line contains receipt keywords or currency
-      const hasReceiptKeyword = receiptKeywords.some(keyword => lowerLine.includes(keyword));
-      const hasCurrency = currencyPattern.test(line);
-      
-      if (hasReceiptKeyword || hasCurrency) {
-        const cleanLine = line.trim();
-        if (cleanLine.length > 5) {
-          relevantLines.push(cleanLine);
-        }
-      }
-    }
-    
-    if (relevantLines.length > 0) {
-      // Limit to most relevant lines (avoid sending too much)
-      const maxLines = Math.min(relevantLines.length, 20);
-      return relevantLines.slice(0, maxLines).join('\n');
-    }
-    
-  } catch (error) {
-    console.error("Error extracting receipt from text:", error);
-  }
-  
-  return null;
 }
