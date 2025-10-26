@@ -1,20 +1,9 @@
-// Key fixes:
-// 1. Better amount detection with stricter patterns
-// 2. PDF attachment fetching via attachmentId
-// 3. Improved HTML amount extraction prioritization
-// 4. Better filtering of concert/promotional emails
-
 console.log("Background script loaded");
-
 chrome.runtime.onInstalled.addListener(() => {
   console.log("Extension installed or updated");
   chrome.identity.getAuthToken(
     {
       interactive: true,
-      scopes: [
-        "https://www.googleapis.com/auth/gmail.readonly",
-        "https://www.googleapis.com/auth/gmail.modify",
-      ],
     },
     (token) => {
       if (chrome.runtime.lastError) {
@@ -38,10 +27,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         chrome.identity.getAuthToken(
           {
             interactive: true,
-            scopes: [
-              "https://www.googleapis.com/auth/gmail.readonly",
-              "https://www.googleapis.com/auth/gmail.modify",
-            ],
+            scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
           },
           (newToken) => {
             if (chrome.runtime.lastError) {
