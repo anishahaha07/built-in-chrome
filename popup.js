@@ -161,7 +161,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     reportDiv.innerHTML = categoryHTML;
   }
-
   function generateSmartInsights() {
     const data = window.currentReceiptData;
     if (!data || data.length === 0) {
@@ -181,27 +180,24 @@ document.addEventListener("DOMContentLoaded", () => {
     const insights = [];
     let potentialSavings = 0;
 
-    if (categoryTotals.food > 0) {
-      const foodSpend = categoryTotals.food;
-      const foodPercentage = ((foodSpend / totalAmount) * 100).toFixed(0);
+    const savingsOpportunities = [];
 
-      if (foodPercentage > 30) {
-        const savingsAmount = foodSpend * 0.3;
+    if (categoryTotals.shopping > 0) {
+      const shoppingSpend = categoryTotals.shopping;
+      const shoppingPercentage = ((shoppingSpend / totalAmount) * 100).toFixed(
+        0
+      );
+      if (shoppingPercentage > 40) {
+        const savingsAmount = shoppingSpend * 0.25;
         potentialSavings += savingsAmount;
-        insights.push({
-          icon: "🍽️",
-          text: `You spent ₹${foodSpend.toFixed(
+        savingsOpportunities.push({
+          category: "shopping",
+          amount: savingsAmount,
+          text: `🛍️ Hold up! Shopping’s eating ${shoppingPercentage}% of your wallet (₹${shoppingSpend.toFixed(
             2
-          )} (${foodPercentage}%) on food delivery. Try cooking at home 3 times a week to save ~₹${savingsAmount.toFixed(
+          )}). Make a wishlist, wait 24 hours before buying, and shop sales to save ~₹${savingsAmount.toFixed(
             2
-          )}/month.`,
-          type: "warning",
-        });
-      } else {
-        insights.push({
-          icon: "✅",
-          text: `Great job! Your food delivery spending (${foodPercentage}%) is reasonable.`,
-          type: "success",
+          )}! 🎯\n*Action Plan*: Set a weekly shopping limit and review it every Sunday.`,
         });
       }
     }
@@ -210,77 +206,41 @@ document.addEventListener("DOMContentLoaded", () => {
       const travelSpend = categoryTotals.travel;
       const travelReceipts = data.filter((r) => r.category === "travel");
       const avgTripCost = travelSpend / travelReceipts.length;
-
       if (avgTripCost > 100) {
         const savingsAmount = travelSpend * 0.2;
         potentialSavings += savingsAmount;
-        insights.push({
-          icon: "🚗",
-          text: `Average ride cost is ₹${avgTripCost.toFixed(
+        savingsOpportunities.push({
+          category: "travel",
+          amount: savingsAmount,
+          text: `🚗 Oops! Rides average ₹${avgTripCost.toFixed(
             2
-          )}. Consider carpooling or public transport for short trips to save ~₹${savingsAmount.toFixed(
+          )}. Carpool or hop on a bus for short trips to pocket ~₹${savingsAmount.toFixed(
             2
-          )}/month.`,
-          type: "warning",
-        });
-      } else {
-        insights.push({
-          icon: "🎯",
-          text: `Your average ride cost (₹${avgTripCost.toFixed(
-            2
-          )}) is economical!`,
-          type: "success",
+          )}! 🚌\n*Action Plan*: Track trips this week—switch to public transport for any under 5km.`,
         });
       }
     }
 
-    if (categoryTotals.shopping > 0) {
-      const shoppingSpend = categoryTotals.shopping;
-      const shoppingPercentage = ((shoppingSpend / totalAmount) * 100).toFixed(
-        0
-      );
-
-      if (shoppingPercentage > 40) {
-        const savingsAmount = shoppingSpend * 0.25;
+    if (categoryTotals.food > 0) {
+      const foodSpend = categoryTotals.food;
+      const foodPercentage = ((foodSpend / totalAmount) * 100).toFixed(0);
+      if (foodPercentage > 30) {
+        const savingsAmount = foodSpend * 0.3;
         potentialSavings += savingsAmount;
-        insights.push({
-          icon: "🛍️",
-          text: `Shopping is ${shoppingPercentage}% of your spending. Create a wishlist and wait 24 hours before purchases to save ~₹${savingsAmount.toFixed(
+        savingsOpportunities.push({
+          category: "food",
+          amount: savingsAmount,
+          text: `🍽️ Whoa, champ! Food delivery’s at ${foodPercentage}% (₹${foodSpend.toFixed(
             2
-          )}/month.`,
-          type: "warning",
+          )}). Cook at home 3x a week to save ~₹${savingsAmount.toFixed(
+            2
+          )}! 🔥\n*Action Plan*: Plan 3 meals this week—start with a simple recipe!`,
         });
       }
     }
 
-    const daysInMonth = 30;
-    const transactionsPerDay = data.length / daysInMonth;
-
-    if (transactionsPerDay > 1.5) {
-      insights.push({
-        icon: "📊",
-        text: `You make ~${transactionsPerDay.toFixed(
-          1
-        )} transactions per day. Batch your purchases weekly to avoid impulse buys.`,
-        type: "info",
-      });
-    }
-
-    const highestCategory = Object.entries(categoryTotals).sort(
-      (a, b) => b[1] - a[1]
-    )[0];
-
-    if (highestCategory) {
-      const [cat, amount] = highestCategory;
-      const percentage = ((amount / totalAmount) * 100).toFixed(0);
-      insights.push({
-        icon: "💡",
-        text: `${getCategoryEmoji(cat)} ${capitalizeFirst(
-          cat
-        )} is your top expense (${percentage}%). Focus on optimizing this category first for maximum impact.`,
-        type: "info",
-      });
-    }
+    savingsOpportunities.sort((a, b) => b.amount - a.amount);
+    insights.push(...savingsOpportunities.slice(0, 2));
 
     const recommendedBudget = totalAmount * 0.85;
     const budgetSavings = totalAmount * 0.15;
@@ -288,10 +248,13 @@ document.addEventListener("DOMContentLoaded", () => {
       potentialSavings += budgetSavings;
       insights.push({
         icon: "🎯",
-        text: `Set a monthly budget of ₹${recommendedBudget.toFixed(
+        text: `Time to shine! Set a ₹${recommendedBudget.toFixed(
           2
-        )} (15% less than current). Track daily to stay on target.`,
-        type: "info",
+        )} budget (15% less than ₹${totalAmount.toFixed(
+          2
+        )}) and track daily like a boss to save ~₹${budgetSavings.toFixed(
+          2
+        )}! 💪\n*Action Plan*: Use a budgeting app or notebook to monitor daily spends.`,
       });
     }
 
@@ -304,26 +267,26 @@ document.addEventListener("DOMContentLoaded", () => {
     const insightsList = document.getElementById("insightsList");
     insightsList.innerHTML = "";
 
-    insights.forEach((insight) => {
+    insights.forEach((insight, index) => {
       const bgColor =
-        insight.type === "warning"
-          ? "bg-red-50 border-red-200"
-          : insight.type === "success"
-          ? "bg-green-50 border-green-200"
-          : "bg-blue-50 border-blue-200";
-
+        index === 0
+          ? "bg-yellow-50 border-yellow-200"
+          : index === 1
+          ? "bg-blue-50 border-blue-200"
+          : "bg-green-50 border-green-200";
       const item = document.createElement("div");
-      item.className = `border ${bgColor} rounded-lg p-3`;
+      item.className = `border ${bgColor} rounded-lg p-3 mb-2`;
       item.innerHTML = `
-        <p class="text-sm text-neutral-700">
-          <span class="text-lg mr-1">${insight.icon}</span>
-          ${insight.text}
-        </p>
-      `;
+      <p class="text-sm text-neutral-700">
+        <span class="text-lg mr-1">${
+          insight.icon || getCategoryEmoji(insight.category)
+        }</span>
+        ${insight.text}
+      </p>
+    `;
       insightsList.appendChild(item);
     });
   }
-
   function getCategoryEmoji(category) {
     const emojis = {
       food: "🍔",
