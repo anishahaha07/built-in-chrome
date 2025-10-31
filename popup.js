@@ -42,14 +42,14 @@ document.addEventListener("DOMContentLoaded", () => {
   insightsSection.id = "insightsSection";
   insightsSection.className = "hidden mt-3 pb-3";
   insightsSection.innerHTML = `
-    <div class="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-300 rounded-lg p-3 mb-3">
+    <div class="bg-gradient-to-r from-emerald-50 to-teal-50 border-2 border-emerald-400 rounded-lg p-3 mb-3">
       <div class="flex items-start gap-2">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5 text-green-700 mt-0.5 flex-shrink-0">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5 text-emerald-700 mt-0.5 flex-shrink-0">
           <path stroke-linecap="round" stroke-linejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 0 0 1.5-.189m-1.5.189a6.01 6.01 0 0 1-1.5-.189m3.75 7.478a12.06 12.06 0 0 1-4.5 0m3.75 2.383a14.406 14.406 0 0 1-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 1 0-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" />
         </svg>
         <div class="flex-1">
-          <p class="text-xs font-semibold text-green-900 mb-1" id="insightTitle">Smart Tips</p>
-          <p class="text-sm font-bold text-green-800" id="savingsPotential">Save up to ₹XXX</p>
+          <p class="text-xs font-semibold text-emerald-900 mb-1" id="insightTitle">Smart Tips</p>
+          <p class="text-sm font-bold text-emerald-800" id="savingsPotential">Save up to ₹XXX</p>
         </div>
       </div>
     </div>
@@ -136,11 +136,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     generateInsights.disabled = true;
     generateInsights.innerHTML = `
-      <svg class="animate-spin inline w-4 h-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-      </svg>
-      Scanning emails...
+      <div class="flex items-center gap-2">
+        <div class="w-4 h-4 border-2 border-neutral-400 border-t-transparent rounded-full animate-spin"></div>
+        <span>Scanning...</span>
+      </div>
     `;
 
     errorDiv.classList.add("hidden");
@@ -170,7 +169,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function resetButton() {
       generateInsights.disabled = false;
-      generateInsights.textContent = "Scan Receipts";
+      generateInsights.innerHTML = `
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke-width="1.5"
+          stroke="currentColor"
+          class="size-6"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z"
+          />
+        </svg>
+        Scan Receipts
+      `;
     }
   });
 
@@ -250,13 +265,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
     insights.tips.forEach((tip, i) => {
       const card = document.createElement("div");
-      card.className = `p-3 rounded-lg border bg-gradient-to-br transition-all duration-200 hover:scale-[1.02]
+      card.className = `p-3 rounded-lg border transition-all duration-200 hover:scale-[1.02] hover:shadow-md
         ${
           i === 0
-            ? "from-blue-50 to-indigo-50 border-blue-300"
+            ? "bg-slate-50 border-slate-300"
             : i === 1
-            ? "from-purple-50 to-pink-50 border-purple-300"
-            : "from-amber-50 to-orange-50 border-amber-300"
+            ? "bg-neutral-50 border-neutral-300"
+            : "bg-stone-50 border-stone-300"
         }
       `;
 
@@ -450,6 +465,9 @@ document.addEventListener("DOMContentLoaded", () => {
     return { savings, tips };
   }
 
+  let pieChartInstance = null;
+  let barChartInstance = null;
+
   function renderDashboard(data) {
     const categories = data.reduce((acc, item) => {
       acc[item.category] = (acc[item.category] || 0) + item.amount;
@@ -457,21 +475,255 @@ document.addEventListener("DOMContentLoaded", () => {
     }, {});
 
     const reportDiv = document.querySelector(".border-2.border-neutral-300");
-    let html =
-      '<div class="p-3"><p class="text-sm font-semibold mb-2">Category Breakdown</p>';
 
-    Object.entries(categories)
-      .sort((a, b) => b[1] - a[1])
-      .forEach(([cat, amount]) => {
-        const emoji = getCategoryEmoji(cat);
-        html += `
-          <div class="flex justify-between items-center py-1 text-sm">
-            <span>${emoji} ${capitalizeFirst(cat)}</span>
-            <span class="font-semibold">₹${amount.toFixed(2)}</span>
-          </div>`;
+    // Destroy previous chart instances
+    if (pieChartInstance) {
+      pieChartInstance.destroy();
+      pieChartInstance = null;
+    }
+    if (barChartInstance) {
+      barChartInstance.destroy();
+      barChartInstance = null;
+    }
+
+    reportDiv.innerHTML = `
+      <div class="p-3">
+        <p class="text-sm font-semibold mb-3">Visual Breakdown</p>
+        
+        <!-- Pie Chart -->
+        <div class="mb-4">
+          <p class="text-xs text-neutral-600 mb-2">Category Distribution</p>
+          <div class="relative" style="height: 200px;">
+            <canvas id="categoryPieChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Bar Chart -->
+        <div class="mb-2">
+          <p class="text-xs text-neutral-600 mb-2">Spending by Category</p>
+          <div class="relative" style="height: 180px;">
+            <canvas id="categoryBarChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Transaction List -->
+        <div class="mt-4 border-t border-neutral-200 pt-3">
+          <p class="text-xs text-neutral-600 mb-2">Recent Transactions</p>
+          <div id="transactionList" class="space-y-2 max-h-48 overflow-y-auto"></div>
+        </div>
+      </div>
+    `;
+
+    // Render charts after DOM is updated
+    setTimeout(() => {
+      renderPieChart(categories);
+      renderBarChart(categories);
+      renderTransactionList(data);
+    }, 50);
+  }
+
+  function renderTransactionList(data) {
+    const listContainer = document.getElementById("transactionList");
+    if (!listContainer) return;
+
+    // Sort by date (most recent first)
+    const sortedData = [...data].sort(
+      (a, b) => new Date(b.date) - new Date(a.date)
+    );
+
+    sortedData.forEach((transaction) => {
+      const item = document.createElement("div");
+      item.className =
+        "flex items-center justify-between p-2 hover:bg-neutral-50 rounded-lg transition-colors";
+
+      const emoji = getCategoryEmoji(transaction.category);
+      const merchantName =
+        transaction.merchant !== "Unknown"
+          ? transaction.merchant
+          : extractMerchantFromSubject(transaction.subject);
+
+      // Format date nicely
+      const date = new Date(transaction.date);
+      const formattedDate = date.toLocaleDateString("en-IN", {
+        month: "short",
+        day: "numeric",
       });
-    html += "</div>";
-    reportDiv.innerHTML = html;
+
+      item.innerHTML = `
+        <div class="flex items-center gap-2 flex-1 min-w-0">
+          <span class="text-lg flex-shrink-0">${emoji}</span>
+          <div class="flex-1 min-w-0">
+            <p class="text-xs font-semibold text-neutral-900 truncate">${merchantName}</p>
+            <p class="text-xs text-neutral-500">${formattedDate}</p>
+          </div>
+        </div>
+        <span class="text-xs font-bold text-neutral-900 flex-shrink-0">₹${transaction.amount.toFixed(
+          2
+        )}</span>
+      `;
+
+      listContainer.appendChild(item);
+    });
+  }
+
+  function extractMerchantFromSubject(subject) {
+    const lower = subject.toLowerCase();
+    if (lower.includes("amazon")) return "Amazon";
+    if (lower.includes("flipkart")) return "Flipkart";
+    if (lower.includes("swiggy")) return "Swiggy";
+    if (lower.includes("zomato")) return "Zomato";
+    if (lower.includes("uber")) return "Uber";
+    if (lower.includes("ola")) return "Ola";
+    if (lower.includes("blinkit")) return "Blinkit";
+    if (lower.includes("myntra")) return "Myntra";
+    if (lower.includes("ajio")) return "Ajio";
+    return "Unknown";
+  }
+
+  function renderPieChart(categories) {
+    const ctx = document.getElementById("categoryPieChart");
+    if (!ctx) return;
+
+    // Check if Chart.js is loaded
+    if (typeof Chart === "undefined") {
+      console.error("Chart.js not loaded yet");
+      ctx.parentElement.innerHTML =
+        '<p class="text-xs text-center text-red-500">Chart library loading...</p>';
+      return;
+    }
+
+    const sortedCategories = Object.entries(categories).sort(
+      (a, b) => b[1] - a[1]
+    );
+    const labels = sortedCategories.map(([cat]) => capitalizeFirst(cat));
+    const values = sortedCategories.map(([, amount]) => amount);
+    const colors = sortedCategories.map(([cat]) => getCategoryColor(cat));
+
+    pieChartInstance = new Chart(ctx, {
+      type: "doughnut",
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            data: values,
+            backgroundColor: colors,
+            borderColor: "#ffffff",
+            borderWidth: 2,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: "right",
+            labels: {
+              boxWidth: 12,
+              font: { size: 10 },
+              padding: 8,
+              generateLabels: (chart) => {
+                const data = chart.data;
+                return data.labels.map((label, i) => ({
+                  text: `${getCategoryEmoji(
+                    sortedCategories[i][0]
+                  )} ${label} ₹${data.datasets[0].data[i].toFixed(0)}`,
+                  fillStyle: data.datasets[0].backgroundColor[i],
+                  hidden: false,
+                  index: i,
+                }));
+              },
+            },
+          },
+          tooltip: {
+            callbacks: {
+              label: (context) => {
+                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                const percentage = ((context.parsed / total) * 100).toFixed(1);
+                return `₹${context.parsed.toFixed(2)} (${percentage}%)`;
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  function renderBarChart(categories) {
+    const ctx = document.getElementById("categoryBarChart");
+    if (!ctx) return;
+
+    const sortedCategories = Object.entries(categories).sort(
+      (a, b) => b[1] - a[1]
+    );
+    const labels = sortedCategories.map(
+      ([cat]) => `${getCategoryEmoji(cat)} ${capitalizeFirst(cat)}`
+    );
+    const values = sortedCategories.map(([, amount]) => amount);
+    const colors = sortedCategories.map(([cat]) => getCategoryColor(cat));
+
+    barChartInstance = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: "Amount Spent",
+            data: values,
+            backgroundColor: colors,
+            borderColor: colors,
+            borderWidth: 1,
+            borderRadius: 6,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              font: { size: 10 },
+              callback: (value) => "₹" + value.toFixed(0),
+            },
+            grid: {
+              color: "rgba(0, 0, 0, 0.05)",
+            },
+          },
+          x: {
+            ticks: {
+              font: { size: 9 },
+            },
+            grid: {
+              display: false,
+            },
+          },
+        },
+        plugins: {
+          legend: {
+            display: false,
+          },
+          tooltip: {
+            callbacks: {
+              label: (context) => `₹${context.parsed.y.toFixed(2)}`,
+            },
+          },
+        },
+      },
+    });
+  }
+
+  function getCategoryColor(category) {
+    const colorMap = {
+      food: "#FF6B6B", // Coral Red
+      groceries: "#4ECDC4", // Teal
+      shopping: "#95E1D3", // Mint
+      travel: "#556FB5", // Navy Blue
+      entertainment: "#A8E6CF", // Soft Green
+      other: "#7D8597", // Slate Gray
+    };
+    return colorMap[category] || "#7D8597";
   }
 
   function getCategoryEmoji(category) {
