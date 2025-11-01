@@ -1,50 +1,71 @@
 console.log("Background script loaded");
-chrome.runtime.onInstalled.addListener(() => {
-  console.log("Extension installed or updated");
-  chrome.identity.getAuthToken(
-    {
-      interactive: true,
-    },
-    (token) => {
-      if (chrome.runtime.lastError) {
-        console.error("Auth error:", chrome.runtime.lastError.message);
-        return;
-      }
-      console.log("Auth token acquired");
-      chrome.storage.local.set({ authToken: token });
-      fetchReceiptEmails(token);
-    }
-  );
-});
+let isScanning = false;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log("Message received:", message);
+
   if (message.action === "refreshEmails") {
-    chrome.storage.local.get(["authToken"], ({ authToken }) => {
-      if (authToken) {
-        fetchReceiptEmails(authToken);
-      } else {
-        chrome.identity.getAuthToken(
-          {
-            interactive: true,
-            scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
-          },
-          (newToken) => {
-            if (chrome.runtime.lastError) {
-              console.error("Auth error:", chrome.runtime.lastError.message);
-              return;
-            }
-            chrome.storage.local.set({ authToken: newToken });
-            fetchReceiptEmails(newToken);
-          }
-        );
-      }
-    });
+    if (isScanning) {
+      sendResponse({ status: "Already scanning…" });
+      return true;
+    }
+
+    isScanning = true;
+    scanWithTokenRefresh().finally(() => (isScanning = false));
+
     sendResponse({ status: "Processing" });
   }
   return true;
 });
+async function scanWithTokenRefresh() {
+  try {
+    // 1. Try to read a cached token
+    const { authToken } = await chrome.storage.local.get(["authToken"]);
 
+    // 2. If we have one → use it, otherwise get a fresh one
+    const token = authToken ?? (await getFreshToken());
+    if (!authToken) await chrome.storage.local.set({ authToken: token });
+
+    await fetchReceiptEmails(token);
+  } catch (err) {
+    // ------------------------------------------------------------
+    // 401 / token-invalid → silently refresh and retry once
+    // ------------------------------------------------------------
+    if (err.message.includes("401") || err.message.includes("invalid token")) {
+      console.warn("Token expired – refreshing…");
+      try {
+        const newToken = await getFreshToken();
+        await chrome.storage.local.set({ authToken: newToken });
+        await fetchReceiptEmails(newToken);
+      } catch (refreshErr) {
+        console.error("Refresh failed:", refreshErr);
+        await chrome.storage.local.set({
+          error: "Auth failed – please re-authenticate.",
+        });
+      }
+    } else {
+      console.error("Scan error:", err);
+      await chrome.storage.local.set({ error: err.message });
+    }
+  }
+}
+
+/* --------------------------------------------------------------
+   Helper – always request an *interactive* token
+   -------------------------------------------------------------- */
+function getFreshToken() {
+  return new Promise((resolve, reject) => {
+    chrome.identity.getAuthToken({ interactive: true }, (token) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+      } else if (!token) {
+        reject(new Error("No token returned"));
+      } else {
+        resolve(token);
+      }
+    });
+  });
+}
 async function fetchReceiptEmails(token) {
   console.log("Fetching emails...");
   try {

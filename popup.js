@@ -4,7 +4,6 @@
   • Triggers background scan
   • Renders category list + Chart.js pie chart
   • Generates smart-savings insights
-=====================================================================*/
 
 document.addEventListener('DOMContentLoaded', () => {
   // -----------------------------------------------------------------
