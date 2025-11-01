@@ -11,6 +11,7 @@
         max-width: 400px;
       }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   </head>
   <body class="p-2">
     <div
@@ -23,33 +24,16 @@
           <img src="/icons/mifi.png" alt="logo" class="h-14 w-14" />
           <h2 class="font-bold text-2xl text-neutral-900">MyFi</h2>
         </div>
-        <div>
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke-width="1.5"
-            stroke="currentColor"
-            class="size-8 text-neutral-500 hover:bg-neutral-200 hover:text-neutral-600 p-1 rounded-lg hover:cursor-pointer"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"
-            />
-          </svg>
-        </div>
       </div>
 
       <div class="py-2 pt-4">
-        <div
-          class="py-1 bg-neutral-100 grid grid-cols-4 justify-between px-4 rounded-lg text-3xl font-semibold"
-        >
+        <div class="py-1 bg-neutral-100 grid grid-cols-4 justify-between px-4 rounded-lg text-3xl font-semibold">
           <div class="col-span-1 border-r border-neutral-300">₹</div>
           <div class="col-span-3 flex justify-end">
             <h2 id="total-amount">0.00</h2>
           </div>
         </div>
+        <p id="last-scanned" class="text-xs text-neutral-500 text-right mt-1">Last scanned: –</p>
       </div>
 
       <div class="py-2">
@@ -94,10 +78,7 @@
         </div>
       </div>
 
-      <div
-        id="savingsPrompt"
-        class="hidden py-3 border-t border-dashed border-neutral-300"
-      ></div>
+      <div id="scan-status" class="hidden py-2 text-center text-sm"></div>
 
       <div class="pt-2 pb-6">
         <div class="py-2 flex items-center">

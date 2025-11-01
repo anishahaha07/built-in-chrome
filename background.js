@@ -1114,3 +1114,21 @@ function validateCategory(category) {
     .trim();
   return validCategories.includes(cat) ? cat : "other";
 }
+
+chrome.storage.local.get(['extractedData', 'lastScanned'], (result) => {
+  if (chrome.runtime.lastError) {
+  console.error('Error retrieving data:', chrome.runtime.lastError);
+    return;
+  }
+
+  const allReceipts = result.extractedData;
+  const scanTimestamp = result.lastScanned;
+
+  if (allReceipts) {
+    console.log('Successfully retrieved receipts:', allReceipts);
+    console.log('Last scanned on:', new Date(scanTimestamp));
+    // You can now use the 'allReceipts' variable.
+  } else {
+    console.log('No receipt data found in local storage.');
+  }
+});

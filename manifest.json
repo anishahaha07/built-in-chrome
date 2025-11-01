@@ -3,7 +3,12 @@
   "name": "MyFi",
   "version": "1.0",
   "description": "Track spending from email receipts with AI",
-  "permissions": ["identity", "identity.email", "storage", "activeTab"],
+  "permissions": [
+    "identity",
+    "identity.email",
+    "storage",
+    "activeTab"
+  ],
   "host_permissions": [
     "https://mail.google.com/*",
     "https://www.accounts.google.com/*",
@@ -27,7 +32,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["chart.js", "popup.js", "popup.css"],
+      "resources": ["popup.js", "popup.css", "icons/*"],
       "matches": ["<all_urls>"]
     }
   ]
