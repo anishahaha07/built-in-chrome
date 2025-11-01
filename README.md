@@ -2,7 +2,7 @@
 
 MyFi is a Chrome extension that automatically tracks your spending by scanning your email receipts. It uses AI to extract key information from your receipts and provides you with visual insights into your spending habits.
 
-![Demo Chart](icons/demo-chart.png)
+![MyFi Icon](icons/mifi.png)
 
 ## Features
 

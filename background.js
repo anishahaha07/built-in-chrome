@@ -87,7 +87,7 @@ async function fetchReceiptEmails(token) {
     console.log(`Found ${data.messages?.length || 0} potential receipt emails`);
     if (data.messages) {
       const emails = await fetchEmailDetails(data.messages, token);
-      const geminiApiKey = "AIzaSyAqMWwrIIM_NQpZ6UjTsbqWu2xKz8DHxes";
+      const geminiApiKey = "your-gemini-api-key";
       const extractedData = await parseEmailsWithGemini(
         emails,
         geminiApiKey,
